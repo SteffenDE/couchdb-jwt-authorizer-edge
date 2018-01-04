@@ -5,12 +5,8 @@ const jwt = require("jsonwebtoken");
 const querystring = require('querystring');
 const config = require("./config");
 
-const jwtSecret = config.jwtSecret;
-const issuer = config.issuer || false;
-const couchSecret = config.couchSecret;
-
-if (!jwtSecret || !couchSecret) {
-  throw new Error("jwtSecret and couchSecret must be provided in config.js!");
+if (!(config.jwt && config.jwt.secret) || !(config.couchdb && config.couchdb.secret)) {
+  throw new Error("config.jwt and config.couchdb must be provided correctly in config.js!");
 }
 
 function parseCookies(cookiestring) {
@@ -24,12 +20,6 @@ function parseCookies(cookiestring) {
 
   return list;
 }
-
-const CouchUserNameHeader = "X-Auth-CouchDB-UserName";
-const CouchRoleHeader = "X-Auth-CouchDB-Roles";
-const CouchTokenHeader = "X-Auth-CouchDB-Token";
-const jwtCouchUserNameField = "sub";
-const jwtCouchRoleField = "roles";
 
 function getToken(request) {
   const queryStringParameters = querystring.decode(request.querystring || "");
@@ -92,7 +82,7 @@ function ValidateToken(token) {
     }
 
     try {
-      const payload = jwt.verify(token, config.jwtSecret, { issuer: iss });
+      const payload = jwt.verify(token, config.jwt.secret, { issuer: iss });
     }
     catch(err) {
       console.log('Verification failed. Invalid access token', err);
@@ -173,23 +163,23 @@ exports.handler = (event, context, callback) => {
   }
 
   ValidateToken(token).then(payload => {
-    const username = payload[jwtCouchUserNameField];
-    let roles = payload[jwtCouchRoleField];
+    const username = payload[config.jwt.couchUserField];
+    let roles = payload[config.jwt.couchRolesField];
     if (!Array.isArray(roles)) {
       roles = [];
     }
     roles.push("user:" + username);
     const couchToken = crypto.createHmac("sha1", config.couchSecret).update(username).digest("hex");
-    headers[CouchUserNameHeader.toLowerCase()] = [{
-      key: CouchUserNameHeader,
+    headers[config.couchdb.usernameHeader.toLowerCase()] = [{
+      key: config.couchdb.usernameHeader,
       value: username
     }];
-    headers[CouchRoleHeader.toLowerCase()] = [{
-      key: CouchRoleHeader,
+    headers[config.couchdb.rolesHeader.toLowerCase()] = [{
+      key: config.couchdb.rolesHeader,
       value: roles.join(',')
     }];
-    headers[CouchTokenHeader.toLowerCase()] = [{
-      key: CouchTokenHeader,
+    headers[config.couchdb.tokenHeader.toLowerCase()] = [{
+      key: config.couchdb.tokenHeader,
       value: couchToken
     }];
     callback(null, request);
