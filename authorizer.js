@@ -1,8 +1,8 @@
-'use strict';
+"use strict";
 
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
-const querystring = require('querystring');
+const querystring = require("querystring");
 const config = require("./config");
 
 if (!(config.jwt && config.jwt.secret) || !(config.couchdb && config.couchdb.secret)) {
@@ -13,20 +13,20 @@ function parseCookies(cookiestring) {
   var list = {};
   var rc = cookiestring;
 
-  rc && rc.split(';').forEach(function( cookie ) {
-    var parts = cookie.split('=');
-    list[parts[0].trim()] = decodeURI(parts.slice(1).join('='));
+  rc && rc.split(";").forEach(function( cookie ) {
+    var parts = cookie.split("=");
+    list[parts[0].trim()] = decodeURI(parts.slice(1).join("="));
   });
 
   return list;
 }
 
 function getToken(request) {
-  const queryStringParameters = querystring.decode(request.querystring || "");
+  const queryStringParameters = querystring.decode(request.querystring || "");
   const headers = request.headers;
   let token;
   if (headers) {
-    if (headers.authorization) {
+    if (headers.authorization && !config.disableAuthHeader) {
       let bearerHeader = headers.authorization[0].value;
       let splitted = bearerHeader.split(" ");
       if (splitted.length !== 2 || !/^Bearer$/i.test(splitted[0])) {
@@ -36,7 +36,7 @@ function getToken(request) {
         token = splitted[1];
       }
     }
-    else if (headers.cookie) {
+    else if (headers.cookie && !config.disableCookie) {
       for (let i = 0; i < headers.cookie.length; i++) {
         let parsedCookies = parseCookies(headers.cookie[i].value);
         if (Object.keys(parsedCookies).indexOf("jwt_token") >= 0) {
@@ -46,10 +46,10 @@ function getToken(request) {
       }
     }
   }
-  if (request.queryStringParameters["token"]) {
-    token = request.queryStringParameters["token"];
-    delete request.queryStringParameters.token;
-    request.queryString = querystring.encode(request.queryStringParameters);
+  if (queryStringParameters["token"] && !config.disableQueryString) {
+    token = queryStringParameters["token"];
+    delete queryStringParameters.token;
+    request.queryString = querystring.encode(queryStringParameters);
   }
   if (!token) {
     return null;
@@ -68,7 +68,7 @@ function ValidateToken(token) {
     }
 
     //Fail if token is not from your User Pool
-    if (decodedJwt.payload.iss != iss) {
+    if (decodedJwt.payload.iss != config.jwt.issuer) {
       console.log("invalid issuer");
       reject("Unauthorized");
       return;
@@ -81,52 +81,27 @@ function ValidateToken(token) {
       return;
     }
 
+    let payload;
     try {
-      const payload = jwt.verify(token, config.jwt.secret, { issuer: iss });
+      payload = jwt.verify(token, config.jwt.secret, { issuer: config.jwt.issuer });
     }
     catch(err) {
-      console.log('Verification failed. Invalid access token', err);
+      console.log("Verification failed. Invalid access token", err);
       reject("Unauthorized");
       return;
     }
-    var checkRegex;
-    let roles = payload.roles;
-    if (!roles) {
+    if (!payload[config.jwt.couchRolesField]) {
       reject("Malformed token");
       return;
     }
     resolve(payload);
   });
-};
-
-function response(status, json, headers, callback) {
-  var response = {
-    status: JSON.stringify(status),
-    headers: {
-      "access-control-allow-origin": [{
-        key: "Access-Control-Allow-Origin",
-        value: headers.origin ? headers.origin[0].value : "*"
-      }],
-      "content-type": [{
-        key: "Content-Type",
-        value: "application/json"
-      }],
-      "content-encoding": [{
-        key: "Content-Encoding",
-        value: "UTF-8"
-      }]
-    }
-  };
-  if (status !== 204) {
-    response["body"] = JSON.stringify(json);
-  }
-  callback(null, response);
 }
 
 exports.handler = (event, context, callback) => {
   const request = event.Records[0].cf.request;
   const headers = request.headers;
-  request.queryStringParameters = querystring.decode(request.querystring || "");
+  request.queryStringParameters = querystring.decode(request.querystring || "");
 
   if (request.method === "OPTIONS") {
     var res = {
@@ -151,7 +126,7 @@ exports.handler = (event, context, callback) => {
             "Authorization, Content-Type"
         }]
       }
-    }
+    };
     callback(null, res);
     return;
   }
@@ -169,14 +144,14 @@ exports.handler = (event, context, callback) => {
       roles = [];
     }
     roles.push("user:" + username);
-    const couchToken = crypto.createHmac("sha1", config.couchSecret).update(username).digest("hex");
+    const couchToken = crypto.createHmac("sha1", config.couchdb.secret).update(username).digest("hex");
     headers[config.couchdb.usernameHeader.toLowerCase()] = [{
       key: config.couchdb.usernameHeader,
       value: username
     }];
     headers[config.couchdb.rolesHeader.toLowerCase()] = [{
       key: config.couchdb.rolesHeader,
-      value: roles.join(',')
+      value: roles.join(",")
     }];
     headers[config.couchdb.tokenHeader.toLowerCase()] = [{
       key: config.couchdb.tokenHeader,
@@ -185,6 +160,7 @@ exports.handler = (event, context, callback) => {
     callback(null, request);
   }).catch(err => {
     // Remove current auth header
+    console.log("Error setting couch headers. Forwarding request anyway...", err);
     if ("Authorization" in headers) {
       delete headers["Authorization"];
     }
