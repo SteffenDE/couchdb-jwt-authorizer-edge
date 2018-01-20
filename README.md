@@ -1,4 +1,6 @@
 # couchdb-jwt-authorizer@edge
+
+[![Greenkeeper badge](https://badges.greenkeeper.io/SteffenDE/couchdb-jwt-authorizer-edge.svg)](https://greenkeeper.io/)
 Uses AWS Lambda@Edge + Cloudfront to use JWT tokens with CouchDB. 
 
 This enables using a CouchDB (Cluster/Standalone) Server which is used as CloudFront origin to authenticate users using [JSON Web Tokens](https://jwt.io/).
